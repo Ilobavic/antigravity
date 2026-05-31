@@ -98,10 +98,8 @@ function App() {
         if (callback) {
           setTimeout(callback, 300);
         } else {
-          // If the system is still active, automatically resume listening
-          if (appStateRef.current !== 'idle') {
-            startListening();
-          }
+          // Always resume listening (even in idle state so we can listen for "start" wake-word)
+          startListening();
         }
       };
 
@@ -136,9 +134,9 @@ function App() {
 
       recognition.current.onend = () => {
         setIsListening(false);
-        // Automatically restart listening if still in active state and not speaking
+        // Automatically restart listening if not currently speaking
         setTimeout(() => {
-          if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+          if (!isSpeakingRef.current) {
             isSilentRestart.current = true;
             startListening();
           }
@@ -151,10 +149,10 @@ function App() {
         if (event.error === 'not-allowed') {
           speak("Microphone access denied. Please allow microphone permissions.");
           setAppState('idle');
-        } else if (event.error === 'no-speech') {
-          // Restart listening on silence timeout if still in active state
+        } else {
+          // Restart listening on silence timeout or other errors
           setTimeout(() => {
-            if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+            if (!isSpeakingRef.current) {
               isSilentRestart.current = true;
               startListening();
             }
@@ -164,6 +162,11 @@ function App() {
     } else {
       setSystemMessage("Speech recognition is not supported in this browser.");
     }
+
+    // Auto-start listening on mount to listen for the "start" wake-word
+    setTimeout(() => {
+      startListening();
+    }, 800);
 
     return () => {
       if (recognition.current) {
@@ -177,6 +180,13 @@ function App() {
 
   const handleCommand = (command) => {
     const currentState = appStateRef.current;
+
+    if (currentState === 'idle') {
+      if (command.includes('start') || command.includes('activate') || command.includes('wake up') || command.includes('resume')) {
+        initSystem();
+      }
+      return;
+    }
     
     // Global escape hatch for composition states
     const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
@@ -196,7 +206,7 @@ function App() {
       } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
         readEmails();
       } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
-        speak("System paused. Tap the microphone to start again.");
+        speak("System paused. Say start to activate again.");
         setAppState('idle');
       } else {
         speak("Command not recognized. Please say compose email, read inbox, or stop.", startListening);
@@ -271,7 +281,7 @@ function App() {
           </button>
           
           <div className="status-indicator">
-            {isListening ? "Listening..." : (appState === 'idle' ? "Tap to Start" : "Waiting for command...")}
+            {isListening ? (appState === 'idle' ? "Say Start to begin" : "Listening...") : (appState === 'idle' ? "Tap to Start" : "Waiting for command...")}
           </div>
           
           {isListening && (
