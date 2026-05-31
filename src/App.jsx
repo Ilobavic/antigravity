@@ -6,7 +6,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 function App() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [systemMessage, setSystemMessage] = useState('Email system ready. Tap the microphone to start. Available commands: compose email, read emails, or stop.');
+  const [systemMessage, setSystemMessage] = useState('welcome to the voice controll Email system, Available commands: compose email, read emails, or stop.');
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
   
