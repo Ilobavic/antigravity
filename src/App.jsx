@@ -14,6 +14,7 @@ function App() {
   const isSpeakingRef = useRef(false);
   const appStateRef = useRef('idle');
   const emailDataRef = useRef({ recipient: '', subject: '', message: '' });
+  const isSilentRestart = useRef(false);
 
   // Update refs to avoid stale closures in event handlers
   useEffect(() => {
@@ -29,11 +30,38 @@ function App() {
     { from: "Bob", subject: "Lunch?", body: "Are we still on for lunch?" }
   ];
 
+  const playBeep = () => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(550, audioCtx.currentTime); // Gentle high beep
+      gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime); // Low volume
+      
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.08); // 80ms beep
+    } catch (e) {
+      console.log("AudioContext beep failed:", e);
+    }
+  };
+
   // Helper to start recognition safely
   const startListening = () => {
     if (recognition.current && !isSpeakingRef.current) {
       setIsListening(true);
       setTranscript(''); // Clear previous text
+      
+      // Play a beep sound if it's a fresh prompt (not a silent/automatic restart)
+      if (!isSilentRestart.current) {
+        playBeep();
+      }
+      isSilentRestart.current = false; // Reset the flag after starting
+      
       try {
         recognition.current.start();
       } catch (e) {
@@ -66,6 +94,7 @@ function App() {
       
       const handleSpeechEnd = () => {
         isSpeakingRef.current = false;
+        isSilentRestart.current = false; // Fresh start from a spoken prompt
         if (callback) {
           setTimeout(callback, 300);
         } else {
@@ -110,6 +139,7 @@ function App() {
         // Automatically restart listening if still in active state and not speaking
         setTimeout(() => {
           if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+            isSilentRestart.current = true;
             startListening();
           }
         }, 100);
@@ -125,6 +155,7 @@ function App() {
           // Restart listening on silence timeout if still in active state
           setTimeout(() => {
             if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+              isSilentRestart.current = true;
               startListening();
             }
           }, 100);
@@ -146,6 +177,17 @@ function App() {
 
   const handleCommand = (command) => {
     const currentState = appStateRef.current;
+
+    // Global escape hatch for composition states
+    const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
+    if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
+      setEmailData({ recipient: '', subject: '', message: '' });
+      speak("Email cancelled. Back to main menu. Say compose email or read inbox.", () => {
+        setAppState('listeningForCommand');
+        startListening();
+      });
+      return;
+    }
     
     if (currentState === 'listeningForCommand') {
       if (command.includes('compose email') || command.includes('send email') || command.includes('compose')) {
@@ -221,6 +263,7 @@ function App() {
             className={`mic-button ${isListening ? 'listening' : ''}`}
             onClick={appState === 'idle' ? initSystem : startListening}
             aria-label={appState === 'idle' ? "Start System" : "Activate Microphone"}
+            autoFocus
           >
             <svg className="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/>
