@@ -6,7 +6,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 function App() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [systemMessage, setSystemMessage] = useState('Welcome to the voice control email system. Tap the microphone to start. Available commands: compose email, read inbox, or stop.');
+  const [systemMessage, setSystemMessage] = useState('Email system ready. Tap the microphone to start. Available commands: compose email, read emails, or stop.');
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
   
@@ -91,6 +91,22 @@ function App() {
       window.speechSynthesis.cancel();
       
       const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Set warm, professional voice parameters
+      utterance.rate = 0.95; // Calm, steady pace (slightly slower than default 1.0)
+      utterance.pitch = 1.05; // Reassuring, warm pitch (slightly higher than default 1.0)
+      
+      // Try to select a high-quality natural English voice
+      const voices = window.speechSynthesis.getVoices();
+      const naturalVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Google') || v.name.includes('Natural') || v.name.includes('Zira') || v.name.includes('Aria') || v.name.includes('David')));
+      if (naturalVoice) {
+        utterance.voice = naturalVoice;
+      } else {
+        const englishVoice = voices.find(v => v.lang.startsWith('en'));
+        if (englishVoice) {
+          utterance.voice = englishVoice;
+        }
+      }
       
       const handleSpeechEnd = () => {
         isSpeakingRef.current = false;
@@ -182,7 +198,7 @@ function App() {
     const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
     if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
       setEmailData({ recipient: '', subject: '', message: '' });
-      speak("Email cancelled. Back to main menu. Say compose email or read inbox.", () => {
+      speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
         setAppState('listeningForCommand');
         startListening();
       });
@@ -199,7 +215,7 @@ function App() {
         speak("System paused. Tap the microphone to start again.");
         setAppState('idle');
       } else {
-        speak("Command not recognized. Please say compose email, read inbox, or stop.", startListening);
+        speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
       }
     } else if (currentState === 'composeRecipient') {
       setEmailData(prev => ({ ...prev, recipient: command }));
@@ -216,13 +232,13 @@ function App() {
       speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
     } else if (currentState === 'confirmSend') {
       if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
-        speak("Email sent successfully. Back to main menu. Say compose email or read inbox.", () => {
+        speak("Email sent successfully. Back to main menu. Say compose email, read emails, or stop.", () => {
           setAppState('listeningForCommand');
           startListening();
         });
         setEmailData({ recipient: '', subject: '', message: '' });
       } else if (command.includes('cancel') || command.includes('no') || command.includes('stop')) {
-        speak("Email cancelled. Back to main menu. Say compose email or read inbox.", () => {
+        speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
           setAppState('listeningForCommand');
           startListening();
         });
@@ -238,7 +254,7 @@ function App() {
     sampleEmails.forEach((email, index) => {
       text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
     });
-    text += "Back to main menu. Say compose email or read inbox.";
+    text += "Back to main menu. Say compose email, read emails, or stop.";
     speak(text, () => {
       setAppState('listeningForCommand');
       startListening();
@@ -247,7 +263,7 @@ function App() {
 
   const initSystem = () => {
     setAppState('listeningForCommand');
-    speak("Welcome to the voice control email system. The available commands are: compose email, read inbox, or stop. Please say a command.", startListening);
+    speak("Email system ready. You can say compose email, read emails, or stop. What would you like to do?", startListening);
   };
 
   return (
