@@ -11,11 +11,82 @@ function App() {
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
   
   const recognition = useRef(null);
+  const isSpeakingRef = useRef(false);
+  const appStateRef = useRef('idle');
+  const emailDataRef = useRef({ recipient: '', subject: '', message: '' });
+
+  // Update refs to avoid stale closures in event handlers
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
+
+  useEffect(() => {
+    emailDataRef.current = emailData;
+  }, [emailData]);
 
   const sampleEmails = [
     { from: "Alice", subject: "Meeting tomorrow", body: "Don't forget our meeting at 10 AM." },
     { from: "Bob", subject: "Lunch?", body: "Are we still on for lunch?" }
   ];
+
+  // Helper to start recognition safely
+  const startListening = () => {
+    if (recognition.current && !isSpeakingRef.current) {
+      setIsListening(true);
+      setTranscript(''); // Clear previous text
+      try {
+        recognition.current.start();
+      } catch (e) {
+        // Recognition might already be running, ignore error
+        console.log("Recognition start ignored:", e);
+      }
+    }
+  };
+
+  // Helper to stop recognition safely
+  const stopListening = () => {
+    if (recognition.current) {
+      try {
+        recognition.current.stop();
+      } catch (e) {
+        console.log("Recognition stop ignored:", e);
+      }
+    }
+    setIsListening(false);
+  };
+
+  const speak = (text, callback = null) => {
+    setSystemMessage(text);
+    if ('speechSynthesis' in window) {
+      isSpeakingRef.current = true;
+      stopListening(); // Stop recognition while system speaks to avoid feedback
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      const handleSpeechEnd = () => {
+        isSpeakingRef.current = false;
+        if (callback) {
+          setTimeout(callback, 300);
+        } else {
+          // If the system is still active, automatically resume listening
+          if (appStateRef.current !== 'idle') {
+            startListening();
+          }
+        }
+      };
+
+      utterance.onend = handleSpeechEnd;
+      utterance.onerror = (e) => {
+        console.error("SpeechSynthesis error:", e);
+        handleSpeechEnd();
+      };
+      
+      window.speechSynthesis.speak(utterance);
+    } else {
+      if (callback) callback();
+    }
+  };
 
   useEffect(() => {
     if (SpeechRecognition) {
@@ -24,89 +95,95 @@ function App() {
       recognition.current.interimResults = false;
       recognition.current.lang = 'en-US';
 
+      recognition.current.onstart = () => {
+        setIsListening(true);
+      };
+
       recognition.current.onresult = (event) => {
-        const currentTranscript = event.results[0][0].transcript.toLowerCase().replace(/[.,!?]/g, '');
+        const currentTranscript = event.results[0][0].transcript.toLowerCase().replace(/[.,!?]/g, '').trim();
         setTranscript(currentTranscript);
         handleCommand(currentTranscript);
       };
 
       recognition.current.onend = () => {
         setIsListening(false);
+        // Automatically restart listening if still in active state and not speaking
+        setTimeout(() => {
+          if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+            startListening();
+          }
+        }, 100);
       };
 
       recognition.current.onerror = (event) => {
         console.error("Speech recognition error", event.error);
-        if (event.error === 'not-allowed') {
-            speak("Microphone access denied. Please allow microphone permissions.");
-        }
         setIsListening(false);
+        if (event.error === 'not-allowed') {
+          speak("Microphone access denied. Please allow microphone permissions.");
+          setAppState('idle');
+        } else if (event.error === 'no-speech') {
+          // Restart listening on silence timeout if still in active state
+          setTimeout(() => {
+            if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+              startListening();
+            }
+          }, 100);
+        }
       };
     } else {
       setSystemMessage("Speech recognition is not supported in this browser.");
     }
-  }, [appState, emailData]);
 
-  const speak = (text, callback = null) => {
-    setSystemMessage(text);
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = () => {
-        if (callback) {
-            setTimeout(callback, 300);
-        } else {
-            // Auto listening mode after system speaks, if in middle of flow
-            if (appState !== 'idle' && appState !== 'confirmSend') {
-               startListening();
-            }
-        }
-      };
-      window.speechSynthesis.speak(utterance);
-    }
-  };
-
-  const startListening = () => {
-    if (recognition.current && !isListening) {
-      setIsListening(true);
-      setTranscript(''); // Clear previous transcript when starting to listen
-      try {
-        recognition.current.start();
-      } catch (e) {
-        console.error(e);
+    return () => {
+      if (recognition.current) {
+        recognition.current.stop();
       }
-    }
-  };
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const handleCommand = (command) => {
-    if (appState === 'idle' || appState === 'listeningForCommand') {
+    const currentState = appStateRef.current;
+    
+    if (currentState === 'listeningForCommand') {
       if (command.includes('compose email') || command.includes('send email') || command.includes('compose')) {
         setAppState('composeRecipient');
         speak("Who is the recipient?", startListening);
       } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
         readEmails();
+      } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
+        speak("System paused. Tap the microphone to start again.");
+        setAppState('idle');
       } else {
-        speak("Command not recognized. Please say compose email or read inbox.", startListening);
+        speak("Command not recognized. Please say compose email, read inbox, or stop.", startListening);
       }
-    } else if (appState === 'composeRecipient') {
+    } else if (currentState === 'composeRecipient') {
       setEmailData(prev => ({ ...prev, recipient: command }));
       setAppState('composeSubject');
       speak("What is the subject?", startListening);
-    } else if (appState === 'composeSubject') {
+    } else if (currentState === 'composeSubject') {
       setEmailData(prev => ({ ...prev, subject: command }));
       setAppState('composeMessage');
       speak("What is the message?", startListening);
-    } else if (appState === 'composeMessage') {
-      setEmailData(prev => ({ ...prev, message: command }));
+    } else if (currentState === 'composeMessage') {
+      const finalEmail = { ...emailDataRef.current, message: command };
+      setEmailData(finalEmail);
       setAppState('confirmSend');
-      speak(`Sending to ${emailData.recipient}. Subject is ${emailData.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
-    } else if (appState === 'confirmSend') {
+      speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
+    } else if (currentState === 'confirmSend') {
       if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
-        speak("Email sent successfully.");
-        setAppState('idle');
+        speak("Email sent successfully. Back to main menu. Say compose email or read inbox.", () => {
+          setAppState('listeningForCommand');
+          startListening();
+        });
         setEmailData({ recipient: '', subject: '', message: '' });
       } else if (command.includes('cancel') || command.includes('no') || command.includes('stop')) {
-        speak("Email cancelled.");
-        setAppState('idle');
+        speak("Email cancelled. Back to main menu. Say compose email or read inbox.", () => {
+          setAppState('listeningForCommand');
+          startListening();
+        });
         setEmailData({ recipient: '', subject: '', message: '' });
       } else {
         speak("Please say send to confirm, or cancel.", startListening);
@@ -119,8 +196,11 @@ function App() {
     sampleEmails.forEach((email, index) => {
       text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
     });
-    speak(text);
-    setAppState('idle');
+    text += "Back to main menu. Say compose email or read inbox.";
+    speak(text, () => {
+      setAppState('listeningForCommand');
+      startListening();
+    });
   };
 
   const initSystem = () => {
