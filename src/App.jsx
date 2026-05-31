@@ -263,7 +263,7 @@ function App() {
 
   const initSystem = () => {
     setAppState('listeningForCommand');
-    speak("Email system ready. You can say compose email, read emails, or stop. What would you like to do?", startListening);
+    speak("welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.", startListening);
   };
 
   return (
