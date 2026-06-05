@@ -13,12 +13,15 @@ function App() {
   );
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
+  const [speechRate, setSpeechRate] = useState(0.95);
   
   const recognition = useRef(null);
   const isSpeakingRef = useRef(false);
   const appStateRef = useRef('idle');
   const emailDataRef = useRef({ recipient: '', subject: '', message: '' });
   const isSilentRestart = useRef(false);
+  const speechRateRef = useRef(0.95);
+  const lastSpokenTextRef = useRef('welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.');
 
   // Update refs to avoid stale closures in event handlers
   useEffect(() => {
@@ -29,12 +32,16 @@ function App() {
     emailDataRef.current = emailData;
   }, [emailData]);
 
+  useEffect(() => {
+    speechRateRef.current = speechRate;
+  }, [speechRate]);
+
   const sampleEmails = [
     { from: "Alice", subject: "Meeting tomorrow", body: "Don't forget our meeting at 10 AM." },
     { from: "Bob", subject: "Lunch?", body: "Are we still on for lunch?" }
   ];
 
-  const playBeep = () => {
+  const playTone = (frequency = 440, type = 'sine', duration = 0.1, volume = 0.04) => {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
@@ -43,15 +50,33 @@ function App() {
       oscillator.connect(gainNode);
       gainNode.connect(audioCtx.destination);
       
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(550, audioCtx.currentTime); // Gentle high beep
-      gainNode.gain.setValueAtTime(0.04, audioCtx.currentTime); // Low volume
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+      gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
       
       oscillator.start();
-      oscillator.stop(audioCtx.currentTime + 0.08); // 80ms beep
+      oscillator.stop(audioCtx.currentTime + duration);
     } catch (e) {
-      console.log("AudioContext beep failed:", e);
+      console.log("AudioContext tone failed:", e);
     }
+  };
+
+  const playBeep = () => {
+    playTone(550, 'sine', 0.08, 0.04);
+  };
+
+  const playSuccessSound = () => {
+    playTone(520, 'sine', 0.08, 0.04);
+    setTimeout(() => playTone(660, 'sine', 0.08, 0.04), 100);
+  };
+
+  const playErrorSound = () => {
+    playTone(220, 'triangle', 0.22, 0.05);
+  };
+
+  const playCancelSound = () => {
+    playTone(400, 'sine', 0.08, 0.04);
+    setTimeout(() => playTone(320, 'sine', 0.12, 0.04), 100);
   };
 
   // Helper to start recognition safely
@@ -88,6 +113,7 @@ function App() {
   };
 
   const speak = (text, callback = null) => {
+    lastSpokenTextRef.current = text;
     setSystemMessage(text);
     if ('speechSynthesis' in window) {
       isSpeakingRef.current = true;
@@ -97,7 +123,7 @@ function App() {
       const utterance = new SpeechSynthesisUtterance(text);
       
       // Set warm, professional voice parameters
-      utterance.rate = 0.95; // Calm, steady pace (slightly slower than default 1.0)
+      utterance.rate = speechRateRef.current;
       utterance.pitch = 1.05; // Reassuring, warm pitch (slightly higher than default 1.0)
       
       // Try to select a high-quality natural English voice
@@ -155,10 +181,54 @@ function App() {
     // Normalize command for state matching and control phrases
     const command = rawCommand.toLowerCase().replace(/[.,!?]/g, '').trim();
 
+    // Global speed adjustment commands
+    if (command === 'speak faster' || command === 'faster') {
+      const newRate = Math.min(2.0, speechRateRef.current + 0.15);
+      setSpeechRate(newRate);
+      speak(`Speed increased to ${Math.round(newRate * 100)} percent.`, startListening);
+      return;
+    }
+    if (command === 'speak slower' || command === 'slower') {
+      const newRate = Math.max(0.5, speechRateRef.current - 0.15);
+      setSpeechRate(newRate);
+      speak(`Speed decreased to ${Math.round(newRate * 100)} percent.`, startListening);
+      return;
+    }
+    if (command === 'normal speed' || command === 'reset speed') {
+      setSpeechRate(0.95);
+      speak("Speed reset to normal.", startListening);
+      return;
+    }
+
+    // Global repeat command
+    if (command === 'repeat' || command === 'say that again' || command === 'repeat last') {
+      speak(lastSpokenTextRef.current, startListening);
+      return;
+    }
+
+    // Global help command
+    if (command === 'help' || command.includes('help') || command === 'what can i say') {
+      let helpText = '';
+      if (currentState === 'listeningForCommand' || currentState === 'idle') {
+        helpText = "Available commands are: compose email, read emails, or stop.";
+      } else if (currentState === 'composeRecipient') {
+        helpText = "You are composing an email. Please speak the recipient's email address, or say cancel to return to the main menu.";
+      } else if (currentState === 'composeSubject') {
+        helpText = "Please speak the subject of the email, or say cancel to return to the main menu.";
+      } else if (currentState === 'composeMessage') {
+        helpText = "Please speak the message body of the email, or say cancel to return to the main menu.";
+      } else if (currentState === 'confirmSend') {
+        helpText = "Say send to open your mail app and send, or cancel to return to the main menu.";
+      }
+      speak(helpText, startListening);
+      return;
+    }
+
     // Global escape hatch for composition states
     const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
     if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
       setEmailData({ recipient: '', subject: '', message: '' });
+      playCancelSound();
       speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
         setAppState('listeningForCommand');
         startListening();
@@ -176,6 +246,7 @@ function App() {
         speak("System paused. Tap the microphone to start again.");
         setAppState('idle');
       } else {
+        playErrorSound();
         speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
       }
     } else if (currentState === 'composeRecipient') {
@@ -221,18 +292,21 @@ function App() {
     } else if (currentState === 'confirmSend') {
       if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
         const mailtoLink = `mailto:${emailDataRef.current.recipient}?subject=${encodeURIComponent(emailDataRef.current.subject)}&body=${encodeURIComponent(emailDataRef.current.message)}`;
+        playSuccessSound();
         speak("Opening your default mail application. Please confirm and send the email from there. Returning to the main menu.", () => {
           window.location.href = mailtoLink;
           setAppState('listeningForCommand');
           setEmailData({ recipient: '', subject: '', message: '' });
         });
       } else if (command.includes('cancel') || command.includes('no') || command.includes('stop')) {
+        playCancelSound();
         speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
           setAppState('listeningForCommand');
           startListening();
         });
         setEmailData({ recipient: '', subject: '', message: '' });
       } else {
+        playErrorSound();
         speak("Please say send to confirm, or cancel.", startListening);
       }
     }
@@ -334,7 +408,7 @@ function App() {
           )}
         </div>
 
-        <div className="command-log">
+        <div className="command-log" aria-live="polite">
           <div className="log-entry user-log">
             <span className="log-label">You:</span>
             <span className="log-text">{transcript || "..."}</span>
