@@ -149,8 +149,11 @@ function App() {
     });
   };
 
-  const handleCommand = (command) => {
+  const handleCommand = (rawCommand) => {
     const currentState = appStateRef.current;
+    
+    // Normalize command for state matching and control phrases
+    const command = rawCommand.toLowerCase().replace(/[.,!?]/g, '').trim();
 
     // Global escape hatch for composition states
     const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
@@ -176,18 +179,45 @@ function App() {
         speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
       }
     } else if (currentState === 'composeRecipient') {
-      setEmailData(prev => ({ ...prev, recipient: command }));
+      // Parse email address by converting verbal keywords like "at" to "@" and "dot" to "."
+      // Remove any spaces.
+      const formattedEmail = rawCommand.toLowerCase()
+        .replace(/\s+at\s+/g, '@')
+        .replace(/\s+dot\s+/g, '.')
+        .replace(/\s+period\s+/g, '.')
+        .replace(/\s+full\s*stop\s+/g, '.')
+        .replace(/\s+/g, '');
+      
+      setEmailData(prev => ({ ...prev, recipient: formattedEmail }));
       setAppState('composeSubject');
       speak("What is the subject?", startListening);
     } else if (currentState === 'composeSubject') {
-      setEmailData(prev => ({ ...prev, subject: command }));
+      setEmailData(prev => ({ ...prev, subject: rawCommand.trim() }));
       setAppState('composeMessage');
       speak("What is the message?", startListening);
     } else if (currentState === 'composeMessage') {
-      const finalEmail = { ...emailDataRef.current, message: command };
+      // Convert verbal punctuation keywords to actual punctuation marks
+      let formattedMessage = rawCommand.trim();
+      formattedMessage = formattedMessage
+        .replace(/\b(dot|period|full\s*stop)\b/gi, '.')
+        .replace(/\bcomma\b/gi, ',')
+        .replace(/\bquestion\s*mark\b/gi, '?')
+        .replace(/\bexclamation\s*(mark|point)\b/gi, '!');
+      
+      // Clean up spacing around punctuation (e.g., "hello . how" -> "hello. how")
+      formattedMessage = formattedMessage
+        .replace(/\s+\./g, '.')
+        .replace(/\s+,/g, ',')
+        .replace(/\s+\?/g, '?')
+        .replace(/\s+!/g, '!');
+        
+      // Capitalize first letter of sentences
+      formattedMessage = formattedMessage.replace(/(^\s*|[.!?]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
+
+      const finalEmail = { ...emailDataRef.current, message: formattedMessage };
       setEmailData(finalEmail);
       setAppState('confirmSend');
-      speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
+      speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${formattedMessage}. Say send to confirm, or cancel.`, startListening);
     } else if (currentState === 'confirmSend') {
       if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
         const mailtoLink = `mailto:${emailDataRef.current.recipient}?subject=${encodeURIComponent(emailDataRef.current.subject)}&body=${encodeURIComponent(emailDataRef.current.message)}`;
@@ -220,9 +250,9 @@ function App() {
       };
 
       recognition.current.onresult = (event) => {
-        const currentTranscript = event.results[0][0].transcript.toLowerCase().replace(/[.,!?]/g, '').trim();
-        setTranscript(currentTranscript);
-        handleCommand(currentTranscript);
+        const rawTranscript = event.results[0][0].transcript;
+        setTranscript(rawTranscript);
+        handleCommand(rawTranscript);
       };
 
       recognition.current.onend = () => {
