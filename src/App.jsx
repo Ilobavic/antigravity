@@ -6,7 +6,11 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 function App() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [systemMessage, setSystemMessage] = useState('welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.');
+  const [systemMessage, setSystemMessage] = useState(
+    SpeechRecognition
+      ? 'welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.'
+      : 'Speech recognition is not supported in this browser.'
+  );
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
   
@@ -133,6 +137,77 @@ function App() {
     }
   };
 
+  const readEmails = () => {
+    let text = `You have ${sampleEmails.length} emails. `;
+    sampleEmails.forEach((email, index) => {
+      text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
+    });
+    text += "Back to main menu. Say compose email, read emails, or stop.";
+    speak(text, () => {
+      setAppState('listeningForCommand');
+      startListening();
+    });
+  };
+
+  const handleCommand = (command) => {
+    const currentState = appStateRef.current;
+
+    // Global escape hatch for composition states
+    const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
+    if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
+      setEmailData({ recipient: '', subject: '', message: '' });
+      speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
+        setAppState('listeningForCommand');
+        startListening();
+      });
+      return;
+    }
+    
+    if (currentState === 'listeningForCommand') {
+      if (command.includes('compose email') || command.includes('send email') || command.includes('compose')) {
+        setAppState('composeRecipient');
+        speak("Who is the recipient?", startListening);
+      } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
+        readEmails();
+      } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
+        speak("System paused. Tap the microphone to start again.");
+        setAppState('idle');
+      } else {
+        speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
+      }
+    } else if (currentState === 'composeRecipient') {
+      setEmailData(prev => ({ ...prev, recipient: command }));
+      setAppState('composeSubject');
+      speak("What is the subject?", startListening);
+    } else if (currentState === 'composeSubject') {
+      setEmailData(prev => ({ ...prev, subject: command }));
+      setAppState('composeMessage');
+      speak("What is the message?", startListening);
+    } else if (currentState === 'composeMessage') {
+      const finalEmail = { ...emailDataRef.current, message: command };
+      setEmailData(finalEmail);
+      setAppState('confirmSend');
+      speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
+    } else if (currentState === 'confirmSend') {
+      if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
+        const mailtoLink = `mailto:${emailDataRef.current.recipient}?subject=${encodeURIComponent(emailDataRef.current.subject)}&body=${encodeURIComponent(emailDataRef.current.message)}`;
+        speak("Opening your default mail application. Please confirm and send the email from there. Returning to the main menu.", () => {
+          window.location.href = mailtoLink;
+          setAppState('listeningForCommand');
+          setEmailData({ recipient: '', subject: '', message: '' });
+        });
+      } else if (command.includes('cancel') || command.includes('no') || command.includes('stop')) {
+        speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
+          setAppState('listeningForCommand');
+          startListening();
+        });
+        setEmailData({ recipient: '', subject: '', message: '' });
+      } else {
+        speak("Please say send to confirm, or cancel.", startListening);
+      }
+    }
+  };
+
   useEffect(() => {
     if (SpeechRecognition) {
       recognition.current = new SpeechRecognition();
@@ -177,8 +252,6 @@ function App() {
           }, 100);
         }
       };
-    } else {
-      setSystemMessage("Speech recognition is not supported in this browser.");
     }
 
     return () => {
@@ -189,77 +262,8 @@ function App() {
         window.speechSynthesis.cancel();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleCommand = (command) => {
-    const currentState = appStateRef.current;
-
-    // Global escape hatch for composition states
-    const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
-    if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
-      setEmailData({ recipient: '', subject: '', message: '' });
-      speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
-        setAppState('listeningForCommand');
-        startListening();
-      });
-      return;
-    }
-    
-    if (currentState === 'listeningForCommand') {
-      if (command.includes('compose email') || command.includes('send email') || command.includes('compose')) {
-        setAppState('composeRecipient');
-        speak("Who is the recipient?", startListening);
-      } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
-        readEmails();
-      } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
-        speak("System paused. Tap the microphone to start again.");
-        setAppState('idle');
-      } else {
-        speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
-      }
-    } else if (currentState === 'composeRecipient') {
-      setEmailData(prev => ({ ...prev, recipient: command }));
-      setAppState('composeSubject');
-      speak("What is the subject?", startListening);
-    } else if (currentState === 'composeSubject') {
-      setEmailData(prev => ({ ...prev, subject: command }));
-      setAppState('composeMessage');
-      speak("What is the message?", startListening);
-    } else if (currentState === 'composeMessage') {
-      const finalEmail = { ...emailDataRef.current, message: command };
-      setEmailData(finalEmail);
-      setAppState('confirmSend');
-      speak(`Sending to ${finalEmail.recipient}. Subject is ${finalEmail.subject}. Message: ${command}. Say send to confirm, or cancel.`, startListening);
-    } else if (currentState === 'confirmSend') {
-      if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
-        speak("Email sent successfully. Back to main menu. Say compose email, read emails, or stop.", () => {
-          setAppState('listeningForCommand');
-          startListening();
-        });
-        setEmailData({ recipient: '', subject: '', message: '' });
-      } else if (command.includes('cancel') || command.includes('no') || command.includes('stop')) {
-        speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
-          setAppState('listeningForCommand');
-          startListening();
-        });
-        setEmailData({ recipient: '', subject: '', message: '' });
-      } else {
-        speak("Please say send to confirm, or cancel.", startListening);
-      }
-    }
-  };
-
-  const readEmails = () => {
-    let text = `You have ${sampleEmails.length} emails. `;
-    sampleEmails.forEach((email, index) => {
-      text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
-    });
-    text += "Back to main menu. Say compose email, read emails, or stop.";
-    speak(text, () => {
-      setAppState('listeningForCommand');
-      startListening();
-    });
-  };
 
   const initSystem = () => {
     setAppState('listeningForCommand');
