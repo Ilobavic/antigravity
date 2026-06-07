@@ -8,7 +8,7 @@ function App() {
   const [transcript, setTranscript] = useState('');
   const [systemMessage, setSystemMessage] = useState(
     SpeechRecognition
-      ? 'welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.'
+      ? 'welcome to the voice controll Email system, Available commands are: compose email, read inbox, read sent emails, or stop.'
       : 'Speech recognition is not supported in this browser.'
   );
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
@@ -164,11 +164,38 @@ function App() {
   };
 
   const readEmails = () => {
-    let text = `You have ${sampleEmails.length} emails. `;
+    let text = `You have ${sampleEmails.length} incoming emails. `;
     sampleEmails.forEach((email, index) => {
       text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
     });
-    text += "Back to main menu. Say compose email, read emails, or stop.";
+    text += "Back to main menu. Say compose email, read inbox, read sent emails, or stop.";
+    speak(text, () => {
+      setAppState('listeningForCommand');
+      startListening();
+    });
+  };
+
+  const readSentEmails = () => {
+    let sentEmails = [];
+    try {
+      sentEmails = JSON.parse(localStorage.getItem('antigravity_sent_emails') || '[]');
+    } catch (e) {
+      console.error("Failed to read from localStorage", e);
+    }
+
+    if (sentEmails.length === 0) {
+      speak("You have not sent any emails yet. Back to main menu. Say compose email, read inbox, read sent emails, or stop.", () => {
+        setAppState('listeningForCommand');
+        startListening();
+      });
+      return;
+    }
+
+    let text = `You have sent ${sentEmails.length} emails. `;
+    sentEmails.forEach((email, index) => {
+      text += `Email ${index + 1}. To ${email.to}. Subject: ${email.subject}. Message: ${email.body}. `;
+    });
+    text += "Back to main menu. Say compose email, read inbox, read sent emails, or stop.";
     speak(text, () => {
       setAppState('listeningForCommand');
       startListening();
@@ -210,7 +237,7 @@ function App() {
     if (command === 'help' || command.includes('help') || command === 'what can i say') {
       let helpText = '';
       if (currentState === 'listeningForCommand' || currentState === 'idle') {
-        helpText = "Available commands are: compose email, read emails, or stop.";
+        helpText = "Available commands are: compose email, read inbox, read sent emails, or stop.";
       } else if (currentState === 'composeRecipient') {
         helpText = "You are composing an email. Please speak the recipient's email address, or say cancel to return to the main menu.";
       } else if (currentState === 'composeSubject') {
@@ -240,6 +267,8 @@ function App() {
       if (command.includes('compose email') || command.includes('send email') || command.includes('compose')) {
         setAppState('composeRecipient');
         speak("Who is the recipient?", startListening);
+      } else if (command.includes('read sent')) {
+        readSentEmails();
       } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
         readEmails();
       } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
@@ -247,7 +276,7 @@ function App() {
         setAppState('idle');
       } else {
         playErrorSound();
-        speak("Command not recognized. Please say compose email, read emails, or stop.", startListening);
+        speak("Command not recognized. Please say compose email, read inbox, read sent emails, or stop.", startListening);
       }
     } else if (currentState === 'composeRecipient') {
       // Parse email address by converting verbal keywords like "at" to "@" and "dot" to "."
@@ -292,6 +321,22 @@ function App() {
     } else if (currentState === 'confirmSend') {
       if (command.includes('send') || command.includes('yes') || command.includes('confirm')) {
         const mailtoLink = `mailto:${emailDataRef.current.recipient}?subject=${encodeURIComponent(emailDataRef.current.subject)}&body=${encodeURIComponent(emailDataRef.current.message)}`;
+        
+        // Save to sent history in localStorage
+        try {
+          const sentEmails = JSON.parse(localStorage.getItem('antigravity_sent_emails') || '[]');
+          const newSentEmail = {
+            to: emailDataRef.current.recipient,
+            subject: emailDataRef.current.subject,
+            body: emailDataRef.current.message,
+            timestamp: new Date().toISOString()
+          };
+          sentEmails.unshift(newSentEmail); // Put newest first
+          localStorage.setItem('antigravity_sent_emails', JSON.stringify(sentEmails));
+        } catch (e) {
+          console.error("Failed to save to localStorage", e);
+        }
+
         playSuccessSound();
         speak("Opening your default mail application. Please confirm and send the email from there. Returning to the main menu.", () => {
           window.location.href = mailtoLink;
@@ -371,7 +416,7 @@ function App() {
 
   const initSystem = () => {
     setAppState('listeningForCommand');
-    speak("welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.", startListening);
+    speak("welcome to the voice controll Email system, Available commands are: compose email, read inbox, read sent emails, or stop.", startListening);
   };
 
   return (
