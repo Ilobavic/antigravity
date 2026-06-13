@@ -208,6 +208,17 @@ function App() {
     // Normalize command for state matching and control phrases
     const command = rawCommand.toLowerCase().replace(/[.,!?]/g, '').trim();
 
+    // Standby wake command
+    if (currentState === 'idle') {
+      const wakeWords = ['start', 'wake up', 'activate', 'tap microphone', 'hello', 'start assistant', 'wake'];
+      const isWakeWord = wakeWords.some(word => command.includes(word));
+      if (isWakeWord) {
+        playSuccessSound();
+        initSystem();
+      }
+      return;
+    }
+
     // Global speed adjustment commands
     if (command === 'speak faster' || command === 'faster') {
       const newRate = Math.min(2.0, speechRateRef.current + 0.15);
@@ -272,7 +283,7 @@ function App() {
       } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
         readEmails();
       } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
-        speak("System paused. Tap the microphone to start again.");
+        speak("System paused. Say start or tap the microphone to start again.");
         setAppState('idle');
       } else {
         playErrorSound();
@@ -376,9 +387,9 @@ function App() {
 
       recognition.current.onend = () => {
         setIsListening(false);
-        // Automatically restart listening if still in active state and not speaking
+        // Automatically restart listening if system is not speaking (standby or active)
         setTimeout(() => {
-          if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+          if (!isSpeakingRef.current) {
             isSilentRestart.current = true;
             startListening();
           }
@@ -391,16 +402,24 @@ function App() {
         if (event.error === 'not-allowed') {
           speak("Microphone access denied. Please allow microphone permissions.");
           setAppState('idle');
-        } else if (event.error === 'no-speech') {
-          // Restart listening on silence timeout if still in active state
+        } else if (event.error === 'no-speech' || event.error === 'aborted') {
+          // Restart listening on silence timeout or abort if system is not speaking
           setTimeout(() => {
-            if (appStateRef.current !== 'idle' && !isSpeakingRef.current) {
+            if (!isSpeakingRef.current) {
               isSilentRestart.current = true;
               startListening();
             }
           }, 100);
         }
       };
+
+      // Auto-start listening in standby mode on load (silently)
+      setTimeout(() => {
+        if (appStateRef.current === 'idle') {
+          isSilentRestart.current = true;
+          startListening();
+        }
+      }, 500);
     }
 
     return () => {
@@ -429,7 +448,7 @@ function App() {
         
         <div className="mic-container">
           <button 
-            className={`mic-button ${isListening ? 'listening' : ''}`}
+            className={`mic-button ${isListening ? (appState === 'idle' ? 'standby' : 'listening') : ''}`}
             onClick={appState === 'idle' ? initSystem : startListening}
             aria-label={appState === 'idle' ? "Start System" : "Activate Microphone"}
             autoFocus
@@ -440,7 +459,9 @@ function App() {
           </button>
           
           <div className="status-indicator">
-            {isListening ? "Listening..." : (appState === 'idle' ? "Tap to Start" : "Waiting for command...")}
+            {isListening 
+              ? (appState === 'idle' ? "Standby: Say 'Start'" : "Listening...") 
+              : (appState === 'idle' ? "Tap to Start" : "Microphone Paused")}
           </div>
           
           {isListening && (

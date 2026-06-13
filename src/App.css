@@ -4,6 +4,8 @@
   --text-muted: #cccccc; /* increased contrast from #888888 */
   --accent-color: #00ff00; /* pure green for maximum contrast */
   --accent-glow: rgba(0, 255, 0, 0.4);
+  --standby-color: #0088ff; /* blue/cyan for standby mode */
+  --standby-glow: rgba(0, 136, 255, 0.4);
 }
 
 body {
@@ -101,6 +103,20 @@ header h1 {
   0% { box-shadow: 0 0 30px var(--accent-glow); }
   50% { box-shadow: 0 0 80px var(--accent-glow); transform: scale(1.05); }
   100% { box-shadow: 0 0 30px var(--accent-glow); }
+}
+
+.mic-button.standby {
+  border-color: var(--standby-color);
+  color: var(--text-main);
+  background: #111111;
+  box-shadow: 0 0 30px var(--standby-glow);
+  animation: standby-pulse 2s infinite ease-in-out;
+}
+
+@keyframes standby-pulse {
+  0% { box-shadow: 0 0 15px var(--standby-glow); transform: scale(1.0); }
+  50% { box-shadow: 0 0 40px var(--standby-glow); transform: scale(1.02); }
+  100% { box-shadow: 0 0 15px var(--standby-glow); transform: scale(1.0); }
 }
 
 .status-indicator {
