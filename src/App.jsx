@@ -22,6 +22,8 @@ function App() {
   const isSilentRestart = useRef(false);
   const speechRateRef = useRef(0.95);
   const lastSpokenTextRef = useRef('welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.');
+  const shouldBeListeningRef = useRef(false);
+  const utteranceRef = useRef(null);
 
   // Update refs to avoid stale closures in event handlers
   useEffect(() => {
@@ -82,6 +84,7 @@ function App() {
   // Helper to start recognition safely
   const startListening = () => {
     if (recognition.current && !isSpeakingRef.current) {
+      shouldBeListeningRef.current = true;
       setIsListening(true);
       setTranscript(''); // Clear previous text
       
@@ -102,6 +105,7 @@ function App() {
 
   // Helper to stop recognition safely
   const stopListening = () => {
+    shouldBeListeningRef.current = false;
     if (recognition.current) {
       try {
         recognition.current.stop();
@@ -121,6 +125,7 @@ function App() {
       window.speechSynthesis.cancel();
       
       const utterance = new SpeechSynthesisUtterance(text);
+      utteranceRef.current = utterance; // Prevent garbage collection
       
       // Set warm, professional voice parameters
       utterance.rate = speechRateRef.current;
@@ -141,13 +146,12 @@ function App() {
       const handleSpeechEnd = () => {
         isSpeakingRef.current = false;
         isSilentRestart.current = false; // Fresh start from a spoken prompt
+        utteranceRef.current = null; // Clean up the ref when finished
         if (callback) {
           setTimeout(callback, 300);
         } else {
-          // If the system is still active, automatically resume listening
-          if (appStateRef.current !== 'idle') {
-            startListening();
-          }
+          // Always resume listening in either standby or active mode
+          startListening();
         }
       };
 
@@ -387,9 +391,9 @@ function App() {
 
       recognition.current.onend = () => {
         setIsListening(false);
-        // Automatically restart listening if system is not speaking (standby or active)
+        // Automatically restart listening if we should be listening and not speaking
         setTimeout(() => {
-          if (!isSpeakingRef.current) {
+          if (shouldBeListeningRef.current && !isSpeakingRef.current) {
             isSilentRestart.current = true;
             startListening();
           }
@@ -400,12 +404,13 @@ function App() {
         console.error("Speech recognition error", event.error);
         setIsListening(false);
         if (event.error === 'not-allowed') {
+          shouldBeListeningRef.current = false;
           speak("Microphone access denied. Please allow microphone permissions.");
           setAppState('idle');
         } else if (event.error === 'no-speech' || event.error === 'aborted') {
-          // Restart listening on silence timeout or abort if system is not speaking
+          // Restart listening on silence timeout or abort if we should be listening and not speaking
           setTimeout(() => {
-            if (!isSpeakingRef.current) {
+            if (shouldBeListeningRef.current && !isSpeakingRef.current) {
               isSilentRestart.current = true;
               startListening();
             }
@@ -420,6 +425,9 @@ function App() {
           startListening();
         }
       }, 500);
+      window.__testHandleCommand = handleCommand;
+      window.__testInitSystem = initSystem;
+      window.__testStartListening = startListening;
     }
 
     return () => {
@@ -429,6 +437,9 @@ function App() {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
+      delete window.__testHandleCommand;
+      delete window.__testInitSystem;
+      delete window.__testStartListening;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
