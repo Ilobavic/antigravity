@@ -8,7 +8,7 @@ function App() {
   const [transcript, setTranscript] = useState('');
   const [systemMessage, setSystemMessage] = useState(
     SpeechRecognition
-      ? 'welcome to the voice controll Email system, Available commands are: compose email, read inbox, read sent emails, or stop.'
+      ? 'welcome to the voice controll Email system, Available commands: compose email, read inbox, or stop or help to know the commands.'
       : 'Speech recognition is not supported in this browser.'
   );
   const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
@@ -240,7 +240,7 @@ function App() {
     if (command === 'help' || command.includes('help') || command === 'what can i say') {
       let helpText = '';
       if (currentState === 'listeningForCommand' || currentState === 'idle') {
-        helpText = "Available commands are: compose email, read inbox, read sent emails, or stop.";
+        helpText = "Here are the available commands: Say compose email, to write a new email. Say read inbox, to read incoming emails. Say read sent emails, to read your sent emails. Say stop, to pause the system. Say help, to hear these commands again. What would you like to do?";
       } else if (currentState === 'composeRecipient') {
         helpText = "You are composing an email. Please speak the recipient's email address, or say cancel to return to the main menu.";
       } else if (currentState === 'composeSubject') {
@@ -426,7 +426,7 @@ function App() {
 
   const initSystem = () => {
     setAppState('listeningForCommand');
-    speak("welcome to the voice controll Email system, Available commands are: compose email, read inbox, read sent emails, or stop.", startListening);
+    speak("welcome to the voice controll Email system, Available commands: compose email, read inbox, or stop or help to know the commands.", startListening);
   };
 
   return (
