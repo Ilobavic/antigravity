@@ -3,25 +3,43 @@ import './App.css';
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+const INITIAL_INBOX_EMAILS = [
+  { id: 1, from: "Alice", email: "alice@example.com", subject: "Meeting tomorrow", body: "Don't forget our meeting at 10 AM." },
+  { id: 2, from: "Bob", email: "bob@example.com", subject: "Lunch?", body: "Are we still on for lunch?" }
+];
+
 function App() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [systemMessage, setSystemMessage] = useState(
     SpeechRecognition
-      ? 'welcome to the voice controll Email system, Available commands: compose email, read inbox, or stop or help to know the commands.'
+      ? 'welcome to the voice controll Email system, Available commands: compose email, read inbox, reply to email, delete email, or stop or help.'
       : 'Speech recognition is not supported in this browser.'
   );
-  const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend
+  const [appState, setAppState] = useState('idle'); // idle, listeningForCommand, composeRecipient, composeSubject, composeMessage, confirmSend, replySelectEmail, deleteSelectEmail
   const [emailData, setEmailData] = useState({ recipient: '', subject: '', message: '' });
   const [speechRate, setSpeechRate] = useState(0.95);
   
+  const [inboxEmails, setInboxEmails] = useState(() => {
+    try {
+      const saved = localStorage.getItem('antigravity_inbox_emails');
+      if (saved !== null) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error("Failed to load inbox emails from localStorage", e);
+    }
+    return INITIAL_INBOX_EMAILS;
+  });
+
   const recognition = useRef(null);
   const isSpeakingRef = useRef(false);
   const appStateRef = useRef('idle');
   const emailDataRef = useRef({ recipient: '', subject: '', message: '' });
+  const inboxEmailsRef = useRef(inboxEmails);
   const isSilentRestart = useRef(false);
   const speechRateRef = useRef(0.95);
-  const lastSpokenTextRef = useRef('welcome to the voice controll Email system, Available commands are: compose email, read emails, or stop.');
+  const lastSpokenTextRef = useRef('welcome to the voice controll Email system, Available commands are: compose email, read emails, reply to email, delete email, or stop.');
   const utteranceRef = useRef(null);
 
   // Update refs to avoid stale closures in event handlers
@@ -34,13 +52,17 @@ function App() {
   }, [emailData]);
 
   useEffect(() => {
+    inboxEmailsRef.current = inboxEmails;
+    try {
+      localStorage.setItem('antigravity_inbox_emails', JSON.stringify(inboxEmails));
+    } catch (e) {
+      console.error("Failed to save inbox emails to localStorage", e);
+    }
+  }, [inboxEmails]);
+
+  useEffect(() => {
     speechRateRef.current = speechRate;
   }, [speechRate]);
-
-  const sampleEmails = [
-    { from: "Alice", subject: "Meeting tomorrow", body: "Don't forget our meeting at 10 AM." },
-    { from: "Bob", subject: "Lunch?", body: "Are we still on for lunch?" }
-  ];
 
   const playTone = (frequency = 440, type = 'sine', duration = 0.1, volume = 0.04) => {
     try {
@@ -166,12 +188,95 @@ function App() {
     }
   };
 
+  const resolveEmailFromInput = (inputStr) => {
+    const emails = inboxEmailsRef.current;
+    if (!emails || emails.length === 0) return null;
+
+    const lower = inputStr.toLowerCase().trim();
+
+    // Check by number / position keywords
+    if (lower.includes('1') || lower.includes('one') || lower.includes('first')) {
+      return emails[0] ? { email: emails[0], index: 0 } : null;
+    }
+    if (lower.includes('2') || lower.includes('two') || lower.includes('second')) {
+      return emails[1] ? { email: emails[1], index: 1 } : null;
+    }
+    if (lower.includes('3') || lower.includes('three') || lower.includes('third')) {
+      return emails[2] ? { email: emails[2], index: 2 } : null;
+    }
+    if (lower.includes('4') || lower.includes('four') || lower.includes('fourth')) {
+      return emails[3] ? { email: emails[3], index: 3 } : null;
+    }
+    if (lower.includes('5') || lower.includes('five') || lower.includes('fifth')) {
+      return emails[4] ? { email: emails[4], index: 4 } : null;
+    }
+
+    // Check by sender name match
+    const matchedIndex = emails.findIndex(e => 
+      lower.includes(e.from.toLowerCase()) || e.from.toLowerCase().includes(lower)
+    );
+    if (matchedIndex !== -1) {
+      return { email: emails[matchedIndex], index: matchedIndex };
+    }
+
+    return null;
+  };
+
+  const initiateReply = (targetEmail) => {
+    const recipient = targetEmail.email || targetEmail.from;
+    const replySubject = targetEmail.subject.startsWith('Re:') 
+      ? targetEmail.subject 
+      : `Re: ${targetEmail.subject}`;
+
+    setEmailData({ recipient, subject: replySubject, message: '' });
+    setAppState('composeMessage');
+    speak(`Replying to ${targetEmail.from}. What is your message?`, startListening);
+  };
+
+  const deleteInboxEmailByIndex = (index) => {
+    const emails = inboxEmailsRef.current;
+    if (index < 0 || index >= emails.length) return false;
+
+    const deletedEmail = emails[index];
+    const updatedEmails = emails.filter((_, i) => i !== index);
+    setInboxEmails(updatedEmails);
+    
+    playSuccessSound();
+    const remainingText = updatedEmails.length === 0 
+      ? "Your inbox is now empty." 
+      : `You have ${updatedEmails.length} email${updatedEmails.length > 1 ? 's' : ''} remaining.`;
+
+    speak(`Email 1 from ${deletedEmail.from} has been deleted. ${remainingText} Back to main menu. Say compose email, read inbox, or stop.`, () => {
+      setAppState('listeningForCommand');
+      startListening();
+    });
+    return true;
+  };
+
+  const deleteAllInboxEmails = () => {
+    setInboxEmails([]);
+    playSuccessSound();
+    speak("All inbox emails have been deleted. Your inbox is empty. Back to main menu. Say compose email, read sent emails, or stop.", () => {
+      setAppState('listeningForCommand');
+      startListening();
+    });
+  };
+
   const readEmails = () => {
-    let text = `You have ${sampleEmails.length} incoming emails. `;
-    sampleEmails.forEach((email, index) => {
+    const emails = inboxEmailsRef.current;
+    if (!emails || emails.length === 0) {
+      speak("Your inbox is empty. Back to main menu. Say compose email, read sent emails, or stop.", () => {
+        setAppState('listeningForCommand');
+        startListening();
+      });
+      return;
+    }
+
+    let text = `You have ${emails.length} incoming email${emails.length > 1 ? 's' : ''}. `;
+    emails.forEach((email, index) => {
       text += `Email ${index + 1}. From ${email.from}. Subject: ${email.subject}. Message: ${email.body}. `;
     });
-    text += "Back to main menu. Say compose email, read inbox, read sent emails, or stop.";
+    text += "Back to main menu. Say reply to email 1, delete email 1, compose email, read inbox, or stop.";
     speak(text, () => {
       setAppState('listeningForCommand');
       startListening();
@@ -240,7 +345,11 @@ function App() {
     if (command === 'help' || command.includes('help') || command === 'what can i say') {
       let helpText = '';
       if (currentState === 'listeningForCommand' || currentState === 'idle') {
-        helpText = "Here are the available commands: Say compose email, to write a new email. Say read inbox, to read incoming emails. Say read sent emails, to read your sent emails. Say stop, to pause the system. Say help, to hear these commands again. What would you like to do?";
+        helpText = "Here are the available commands: Say compose email, to write a new email. Say read inbox, to read incoming emails. Say reply to email 1, to reply to an email. Say delete email 1, to delete an email. Say read sent emails, to read sent emails. Say stop, to pause. What would you like to do?";
+      } else if (currentState === 'replySelectEmail') {
+        helpText = "Say email 1, email 2, or the sender's name to reply, or say cancel to return to the main menu.";
+      } else if (currentState === 'deleteSelectEmail') {
+        helpText = "Say email 1, email 2, sender's name, or say all to delete emails, or say cancel to return to the main menu.";
       } else if (currentState === 'composeRecipient') {
         helpText = "You are composing an email. Please speak the recipient's email address, or say cancel to return to the main menu.";
       } else if (currentState === 'composeSubject') {
@@ -254,12 +363,12 @@ function App() {
       return;
     }
 
-    // Global escape hatch for composition states
-    const isComposing = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend'].includes(currentState);
-    if (isComposing && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
+    // Global escape hatch for interactive states
+    const isInteractiveState = ['composeRecipient', 'composeSubject', 'composeMessage', 'confirmSend', 'replySelectEmail', 'deleteSelectEmail'].includes(currentState);
+    if (isInteractiveState && (command === 'stop' || command === 'cancel' || command === 'start over' || command === 'exit' || command === 'quit')) {
       setEmailData({ recipient: '', subject: '', message: '' });
       playCancelSound();
-      speak("Email cancelled. Back to main menu. Say compose email, read emails, or stop.", () => {
+      speak("Email action cancelled. Back to main menu. Say compose email, read inbox, or stop.", () => {
         setAppState('listeningForCommand');
         startListening();
       });
@@ -274,16 +383,65 @@ function App() {
         readSentEmails();
       } else if (command.includes('read inbox') || command.includes('read email') || command.includes('read')) {
         readEmails();
+      } else if (command.includes('reply')) {
+        const resolved = resolveEmailFromInput(rawCommand);
+        if (resolved) {
+          initiateReply(resolved.email);
+        } else {
+          const emails = inboxEmailsRef.current;
+          if (!emails || emails.length === 0) {
+            speak("Your inbox is empty. There are no emails to reply to. Back to main menu.", startListening);
+          } else {
+            setAppState('replySelectEmail');
+            speak("Which email would you like to reply to? Say email 1, email 2, or say sender name.", startListening);
+          }
+        }
+      } else if (command.includes('delete') || command.includes('remove')) {
+        if (command.includes('all') || command.includes('everything')) {
+          deleteAllInboxEmails();
+        } else {
+          const resolved = resolveEmailFromInput(rawCommand);
+          if (resolved) {
+            deleteInboxEmailByIndex(resolved.index);
+          } else {
+            const emails = inboxEmailsRef.current;
+            if (!emails || emails.length === 0) {
+              speak("Your inbox is empty. There are no emails to delete. Back to main menu.", startListening);
+            } else {
+              setAppState('deleteSelectEmail');
+              speak("Which email would you like to delete? Say email 1, email 2, sender name, or say all.", startListening);
+            }
+          }
+        }
       } else if (command.includes('stop') || command.includes('exit') || command.includes('pause') || command.includes('quit')) {
         speak("System paused. Tap the microphone to start again.");
         setAppState('idle');
       } else {
         playErrorSound();
-        speak("Command not recognized. Please say compose email, read inbox, read sent emails, or stop.", startListening);
+        speak("Command not recognized. Please say compose email, read inbox, reply to email, delete email, or stop.", startListening);
+      }
+    } else if (currentState === 'replySelectEmail') {
+      const resolved = resolveEmailFromInput(rawCommand);
+      if (resolved) {
+        initiateReply(resolved.email);
+      } else {
+        playErrorSound();
+        speak("Could not find that email. Please say email 1, email 2, or sender name, or say cancel.", startListening);
+      }
+    } else if (currentState === 'deleteSelectEmail') {
+      if (command.includes('all') || command.includes('everything')) {
+        deleteAllInboxEmails();
+      } else {
+        const resolved = resolveEmailFromInput(rawCommand);
+        if (resolved) {
+          deleteInboxEmailByIndex(resolved.index);
+        } else {
+          playErrorSound();
+          speak("Could not find that email. Please say email 1, email 2, sender name, or say all, or cancel.", startListening);
+        }
       }
     } else if (currentState === 'composeRecipient') {
       // Parse email address by converting verbal keywords like "at" to "@" and "dot" to "."
-      // Remove any spaces.
       const formattedEmail = rawCommand.toLowerCase()
         .replace(/\s+at\s+/g, '@')
         .replace(/\s+dot\s+/g, '.')
@@ -307,7 +465,7 @@ function App() {
         .replace(/\bquestion\s*mark\b/gi, '?')
         .replace(/\bexclamation\s*(mark|point)\b/gi, '!');
       
-      // Clean up spacing around punctuation (e.g., "hello . how" -> "hello. how")
+      // Clean up spacing around punctuation
       formattedMessage = formattedMessage
         .replace(/\s+\./g, '.')
         .replace(/\s+,/g, ',')
@@ -360,6 +518,11 @@ function App() {
     }
   };
 
+  const initSystem = () => {
+    setAppState('listeningForCommand');
+    speak("welcome to the voice controll Email system, Available commands: compose email, read inbox, reply to email, delete email, or stop or help.", startListening);
+  };
+
   useEffect(() => {
     if (SpeechRecognition) {
       recognition.current = new SpeechRecognition();
@@ -408,6 +571,7 @@ function App() {
       window.__testHandleCommand = handleCommand;
       window.__testInitSystem = initSystem;
       window.__testStartListening = startListening;
+      window.__testInboxEmails = () => inboxEmailsRef.current;
     }
 
     return () => {
@@ -420,14 +584,10 @@ function App() {
       delete window.__testHandleCommand;
       delete window.__testInitSystem;
       delete window.__testStartListening;
+      delete window.__testInboxEmails;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const initSystem = () => {
-    setAppState('listeningForCommand');
-    speak("welcome to the voice controll Email system, Available commands: compose email, read inbox, or stop or help to know the commands.", startListening);
-  };
 
   return (
     <div className="app-container">
@@ -480,3 +640,4 @@ function App() {
 }
 
 export default App;
+
