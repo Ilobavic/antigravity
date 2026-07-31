@@ -441,9 +441,13 @@ function App() {
         }
       }
     } else if (currentState === 'composeRecipient') {
-      // Parse email address by converting verbal keywords like "at" to "@" and "dot" to "."
+      // Parse email address by converting verbal keywords like "at" to "@", "dot" to ".", and normalizing speech recognition artifacts like "e-mail" to "email"
       const formattedEmail = rawCommand.toLowerCase()
+        .replace(/\be-mail\b/gi, 'email')
+        .replace(/\bg-mail\b/gi, 'gmail')
+        .replace(/\bhot-mail\b/gi, 'hotmail')
         .replace(/\s+at\s+/g, '@')
+        .replace(/\s*@\s*/g, '@')
         .replace(/\s+dot\s+/g, '.')
         .replace(/\s+period\s+/g, '.')
         .replace(/\s+full\s*stop\s+/g, '.')
